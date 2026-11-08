@@ -1,0 +1,98 @@
+version: "3"
+
+vars:
+  RATE: 1
+  DURATION: 3m
+  ALLOW_HIGHER_RATE: 0
+  FAIL_ON_CHALLENGE: 1
+  FAIL_ON_NON200: 1
+  P95_MS: ""
+  PROXY_RAW:
+    sh: find proxies -maxdepth 1 -type f -name '*.env' -printf '%f\n' | sort
+  SITE_RAW:
+    sh: find sites -maxdepth 1 -type f -name '*.json' -printf '%f\n' | sort
+  UA_RAW:
+    sh: find user-agents -maxdepth 1 -type f -name '*.json' -printf '%f\n' | sort
+  PROXIES:
+    ref: compact (splitLines .PROXY_RAW)
+  SITES:
+    ref: compact (splitLines .SITE_RAW)
+  UAS:
+    ref: compact (splitLines .UA_RAW)
+
+tasks:
+  default:
+    desc: Show every proxy, site, and user-agent cell
+    cmds:
+    - task: show
+    silent: true
+
+  show:
+    desc: Show every proxy, site, and user-agent cell
+    cmds:
+    - echo "{{len .PROXIES}} proxies, {{len .SITES}} sites, {{len .UAS}} user-agent files"
+    - for:
+        matrix:
+          PROXY:
+            ref: .PROXIES
+          SITE:
+            ref: .SITES
+          UA:
+            ref: .UAS
+      cmd: echo "{{.ITEM.PROXY}}  {{.ITEM.SITE}}  {{.ITEM.UA}}"
+    silent: true
+
+  run:
+    desc: Run one cell. Set PROXY, SITE, and UA to file names.
+    requires:
+      vars:
+      - name: PROXY
+      - name: SITE
+      - name: UA
+    vars:
+      CELL: >-
+        {{trimSuffix ".env" .PROXY}}-{{trimSuffix ".json" .SITE}}-{{trimSuffix ".json" .UA}}
+      OK: >-
+        {{
+          and (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*\\.env$" .PROXY)
+              (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*\\.json$" .SITE)
+              (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*\\.json$" .UA)
+        }}
+    preconditions:
+    - sh: test "{{.OK}}" = "true"
+      msg: "PROXY, SITE, and UA must be file names like proxy1.env, dancebet.json, and default.json."
+    cmds:
+    - mkdir -p results
+    - chmod 777 results
+    - >-
+      docker compose run --rm -T
+        --env-from-file "proxies/{{.PROXY}}"
+        -e "SITE_FILE={{.SITE}}"
+        -e "UA_FILE={{.UA}}"
+        -e "CELL={{.CELL}}"
+        -e "RATE={{.RATE}}"
+        -e "DURATION={{.DURATION}}"
+        -e "ALLOW_HIGHER_RATE={{.ALLOW_HIGHER_RATE}}"
+        -e "FAIL_ON_CHALLENGE={{.FAIL_ON_CHALLENGE}}"
+        -e "FAIL_ON_NON200={{.FAIL_ON_NON200}}"
+        -e "P95_MS={{.P95_MS}}"
+      k6 run --no-usage-report
+      --out "csv=/results/{{.CELL}}.csv"
+      /scripts/probe.js
+
+  all:
+    desc: Run every cell, one after another
+    cmds:
+    - for:
+        matrix:
+          PROXY:
+            ref: .PROXIES
+          SITE:
+            ref: .SITES
+          UA:
+            ref: .UAS
+      task: run
+      vars:
+        PROXY: "{{.ITEM.PROXY}}"
+        SITE: "{{.ITEM.SITE}}"
+        UA: "{{.ITEM.UA}}"

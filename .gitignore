@@ -1,0 +1,9 @@
+proxies/*.env
+sites/*
+!sites/example.json
+user-agents/*
+!user-agents/default.json
+results/
+gateways.yml
+**/*.md
+!README.md
